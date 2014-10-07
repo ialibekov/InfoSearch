@@ -50,8 +50,9 @@ class LM(object):
 
                 if i % 1000 == 0:
                     print "Computing line {}".format(i)
+            self.v = len(self.words_frequency)
             print "total words     = {:7}".format(self.number_of_words)
-            print "unique words    = {:7}".format(len(self.words_frequency))
+            print "unique words    = {:7}".format(self.v)
             print "total bigrams   = {:7}".format(self.number_of_bigrams)
             print "unique bigrams  = {:7}".format(len(self.bigrams_frequency))
             print "total trigrams  = {:7}".format(self.number_of_trigrams)
@@ -90,20 +91,24 @@ class LM(object):
             t = sorted([w1, w2, w3])
             return u"{} {} {}".format(t[0], t[1], t[2])
 
-    def __p_lid(self, w):
+    def __p_lid(self, w1, w2=None, w3=None):
+        """
+        Возвращает сглаженную условную вероятность по Лидстону, если указано больше одного параметра. Иначе вернет
+        сглаженную вероятность слова w1.
+        """
         l = 0.5
-        parts = len(w.split())
-        if parts == 3:
-            return (self.trigrams_frequency.get(w, 0.0) + l) / (self.number_of_trigrams + l * self.number_of_words ** 3)
-        elif parts == 2:
-            return (self.bigrams_frequency.get(w, 0.0) + l) / (self.number_of_bigrams + l * self.number_of_words ** 2)
-        elif parts == 1:
-            return (self.words_frequency.get(w, 0.0) + l) / (self.number_of_words + l * self.number_of_words)
+        if w2 is None:
+            return (self.words_frequency.get(w1, 0.0) + l) / (self.number_of_words + l * self.v)
+        elif w3 is None:
+            b = self.__make_n_gram(w1, w2)
+            return (self.bigrams_frequency.get(b, 0.0) + l) / (self.words_frequency.get(w1, 0.0) + l * self.v)
         else:
-            raise ValueError("LID can't handle this words sequence!")
+            b = self.__make_n_gram(w1, w2)
+            t = self.__make_n_gram(w1, w2, w3)
+            return (self.trigrams_frequency.get(t, 0.0) + l) / (self.bigrams_frequency.get(b, 0.0) + l * self.v ** 2)
 
     def run(self):
-        for e,t in sorted(self.trigrams_frequency.items(), key=lambda tup: -tup[1])[:10]:
+        for e, t in sorted(self.trigrams_frequency.items(), key=lambda tup: -tup[1])[:10]:
             print e
         while True:
             p = 1
@@ -122,26 +127,21 @@ class LM(object):
                         w1 = words_list[0]
                         w2 = words_list[1]
                         w3 = words_list[2]
-                        trigram = self.__make_n_gram(w1, w2, w3)
-                        p *= self.__p_lid(trigram)  # Оптимизация: P(w1)P(w2|w1)P(w3|w1w2) = P(w1w2w3)
+                        p *= self.__p_lid(w1) * self.__p_lid(w1, w2) * self.__p_lid(w1, w2, w3)
                         w1, w2 = w2, w3
                         for w3 in words_list[3:]:
-                            trigram = self.__make_n_gram(w1, w2, w3)
-                            bigram = self.__make_n_gram(w1, w2)
-                            p *= self.__p_lid(trigram) / self.__p_lid(bigram)
-                            w1 = w2
-                            w2 = w3
+                            p *= self.__p_lid(w1, w2, w3)
+                            w1, w2 = w2, w3
                     elif n == 2:
                         w1 = words_list[0]
                         w2 = words_list[1]
-                        bigram = self.__make_n_gram(w1, w2)
-                        p *= self.__p_lid(bigram)
+                        p *= self.__p_lid(w1) * self.__p_lid(w1, w2)
                     elif n == 1:
                         w1 = words_list[0]
-                        unigram = self.__make_n_gram(w1)
-                        p *= self.__p_lid(unigram)
+                        p *= self.__p_lid(w1)
                     words_list = list()
             print "P = {}".format(p)
+
 
 def main():
     lm = LM("corpus.txt")
