@@ -6,6 +6,7 @@ __author__ = "Alibekov"
 from struct import pack, unpack
 from pymystem3 import Mystem
 import random
+import pickle
 
 
 def vb_encode_number(number):
@@ -74,76 +75,74 @@ def s9_decode(bytestream):
     return numbers
 
 
+def pack_doc_ids(doc_ids):
+    doc_ids_diff = doc_ids[:1] + [j-i for i, j in zip(doc_ids[:-1], doc_ids[1:])]
+    return s9_encode(doc_ids_diff)
+
+
+def unpack_doc_ids(packed_doc_ids):
+    doc_ids = s9_decode(packed_doc_ids)
+    # replacing the difference between docIds with docIds
+    x = 0
+    for i in xrange(len(doc_ids)):
+        t = doc_ids[i]
+        doc_ids[i] += x
+        x += t
+    return doc_ids
+
+
 class Index(object):
     def __init__(self, input_file):
         self.stemmer = Mystem()
-        self.documents = dict()
         self.tokens = list()
-        self.terms = dict()
-        self.index = list()
+        self.index = dict()
+        self.number_of_documents = 0
 
-        # reading documents, making tokenization
-        with open(input_file, "r") as f:
-            for i, line in enumerate(f, start=1):
-                self.documents[i] = line.decode("utf-8")
-                for word in self.stemmer.lemmatize(line):
-                    token = word.translate(None, '.,?!:;()"\'-').decode("utf-8").strip()
-                    if token:
-                        self.tokens.append((token, i))
+        try:
+            self.read_from_file_compressed("index_compressed.txt")
+        except:
+            # reading documents, making tokenization
+            with open(input_file, "r") as f:
+                for line in f:
+                    self.number_of_documents += 1
+                    # self.documents[i] = line.decode("utf-8")
+                    for word in self.stemmer.lemmatize(line):
+                        token = word.translate(None, '.,?!:;()"\'-').decode("utf-8").strip()
+                        if token:
+                            self.tokens.append((token, self.number_of_documents))
 
-        # sorting by tokens first, then by frequency
-        self.tokens.sort(key=lambda tup: (tup[0], tup[1]))
+            # sorting by tokens first, then by frequency
+            self.tokens.sort(key=lambda tup: (tup[0], tup[1]))
 
-        # terminization and building index
-        current_term = self.tokens[0][0]
-        current_doc_id = self.tokens[0][1]
-        doc_ids = [current_doc_id]
-        for token, doc_id in self.tokens:
-            term = token.lower()
-            if term == current_term:
-                if doc_id != current_doc_id:
-                    doc_ids.append(doc_id)
+            # terminization and building index
+            current_term = self.tokens[0][0]
+            current_doc_id = self.tokens[0][1]
+            doc_ids = [current_doc_id]
+            for token, doc_id in self.tokens:
+                term = token.lower()
+                if term == current_term:
+                    if doc_id != current_doc_id:
+                        doc_ids.append(doc_id)
+                        current_doc_id = doc_id
+                else:
+                    self.index[current_term] = (len(doc_ids), pack_doc_ids(doc_ids))
+                    current_term = term
                     current_doc_id = doc_id
-            else:
-                self.terms[current_term] = (len(doc_ids), doc_ids)
-                self.index.append((current_term, len(doc_ids), doc_ids))
-                current_term = term
-                current_doc_id = doc_id
-                doc_ids = [doc_id]
-        self.terms[current_term] = (len(doc_ids), doc_ids)
-        self.index.append((current_term, len(doc_ids), doc_ids))
+                    doc_ids = [doc_id]
+            self.index[current_term] = (len(doc_ids), pack_doc_ids(doc_ids))
+            del self.tokens
+            self.write_index_in_file()
 
-    def print_to_file(self):
-        with open("result.txt", "w") as f:
-            for term, count, doc_ids in self.index:
-                f.write("{},\t{},\t{}\n".format(term.encode("utf-8"), count, doc_ids))
+    def write_index_in_file(self):
+        with open("index_compressed.txt", "w") as f:
+            pickle.dump(self.index, f)
 
-    def print_to_file_compressed(self):
-        with open("result_compressed.txt", "w") as f:
-            for term, count, doc_ids in self.index:
-                # replacing docIds with difference between them
-                doc_ids = doc_ids[:1] + [j-i for i, j in zip(doc_ids[:-1], doc_ids[1:])]
-                f.write("{},\t{},\t{}\n".format(term.encode("utf-8"), count, s9_encode(doc_ids)))
-
-    def print_statistics(self):
-        terms_num = len(self.terms)
-        terms_len = 0.
-        for term in self.terms:
-            terms_len += len(term)
-
-        print "***********************"
-        print "Number of terms = {}".format(terms_num)
-        print "Average term length = {}".format(terms_len / terms_num)
-        print "***********************"
+    def read_from_file_compressed(self, index_file):
+        with open(index_file, "r") as f:
+            self.index = pickle.load(f)
 
 
-def main():
-    print "Index is building. Wait for a minute..."
-    index = Index("input_text.txt")
-    print "Finished building index.\n\n"
-    index.print_to_file()
-    index.print_to_file_compressed()
-    # index.print_statistics()
+def test():
     print "VarByte test"
     random_list = random.sample(xrange(1, 1000), random.randrange(1, 8))
     print "Random list: {}".format(random_list)
@@ -160,6 +159,12 @@ def main():
     print "Encrypted: {}".format(repr(c))
     print "Decrypted: {}".format(s9_decode(c))
 
+
+def main():
+    print "Index is building. Wait for a minute..."
+    Index("input_text.txt")
+    print "Finished building index.\n\n"
+    test()
 
 
 if __name__ == "__main__":

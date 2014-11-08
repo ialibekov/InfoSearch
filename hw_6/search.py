@@ -3,7 +3,7 @@
 
 __author__ = "Alibekov"
 
-from index import Index
+from index import Index, unpack_doc_ids
 
 
 # Tree realisation class
@@ -86,13 +86,15 @@ class Parser(object):
 
 class Search(object):
     def __init__(self, input_file):
-        self.index = Index(input_file)
+        self.input_file = input_file
+        self.index = Index(self.input_file)
         self.result = list()
 
     def go(self):
         print "What you are looking for?"
         query = raw_input()
-        while query != "QUIT":
+        query = " ".join(self.index.stemmer.lemmatize(query)[:-1])
+        while query != u"QUIT":
             try:
                 self.__go_searching(query)
                 if len(self.result) == 0:
@@ -100,24 +102,25 @@ class Search(object):
                 else:
                     print "\nNumber of documents found: {}".format(len(self.result))
                     count = 0
-                    for doc_id in self.result:
+                    for doc_id, document in self.result:
                         if count > 10:
-                            print "\nShow next documents?"
+                            print "\nShow next documents?\n(Press Enter if you want more, or any symbol otherwise)"
                             response = raw_input()
                             if response:
                                 break
                             else:
                                 count = 0
-                        print "{0}\t{1}".format(doc_id, self.index.documents[doc_id][:-1].encode("utf-8"))
+                        print "{0}\t{1}".format(doc_id, document)
                         count += 1
             except ParseError as e:
                 print e.value
             print "\nWhat you are looking for?"
             query = raw_input()
+            query = " ".join(self.index.stemmer.lemmatize(query))
 
     def __go_searching(self, query):
         parser = Parser(query)
-        self.result = sorted(self.__search(parser.tree))
+        self.load_documents(sorted(self.__search(parser.tree)))
 
     def __search(self, tree):
         if tree.lexeme == "OR":
@@ -140,12 +143,23 @@ class Search(object):
                 result -= child
             return result
         elif tree.lexeme == "NOT":
-            return set(range(len(self.index.documents))) - self.__search(tree.children[0])
+            return set(range(len(self.index.number_of_documents))) - self.__search(tree.children[0])
         else:
-            if tree.lexeme in self.index.terms:
-                return set(self.index.terms[tree.lexeme][1])
+            if tree.lexeme in self.index.index:
+                #
+                # !!! Decompression is used here.
+                #
+                return set(unpack_doc_ids(self.index.index[tree.lexeme][1]))
             else:
                 return set()
+
+    def load_documents(self, doc_ids):
+        with open(self.input_file) as f:
+            del self.result
+            self.result = list()
+            for i, line in enumerate(f, start=1):
+                if i in doc_ids:
+                    self.result.append((i, line))
 
 
 def main():
